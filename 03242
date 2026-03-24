@@ -1,1 +1,30 @@
-1
+Public Function ExtractPassword(ByVal strConn As String) As String
+    Dim arrPairs() As String
+    Dim arrKeyValue() As String
+    Dim i As Integer
+    
+    ' 如果字串是空的，直接回傳空值
+    If Len(strConn) = 0 Then Exit Function
+    
+    ' 1. 用「分號」切割出每一個設定區塊 (例如 "userid=test" 跟 " password=asdfzxcv")
+    arrPairs = Split(strConn, ";")
+    
+    ' 2. 逐一檢查切出來的區塊
+    For i = 0 To UBound(arrPairs)
+        ' 確認這個區塊裡面有沒有等號
+        If InStr(arrPairs(i), "=") > 0 Then
+            ' 3. 用「等號」切割成「左邊(Key)」與「右邊(Value)」，最多只切成 2 塊避免密碼裡有等號被誤切
+            arrKeyValue = Split(arrPairs(i), "=", 2)
+            
+            ' 4. 判斷左邊的 Key 是不是 password (用 LCase 轉小寫並 Trim 去空白來比對，最安全)
+            If LCase(Trim(arrKeyValue(0))) = "password" Then
+                ' 找到了！回傳右邊的密碼值 (同樣去一下前後的空白)
+                ExtractPassword = Trim(arrKeyValue(1))
+                Exit Function
+            End If
+        End If
+    Next i
+    
+    ' 如果整串找完都沒看到 password，就回傳空字串
+    ExtractPassword = ""
+End Function
