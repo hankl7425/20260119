@@ -1,27 +1,25 @@
-Private Sub Form_Load()
+Public Sub OpenPDFWindow(ByVal strPath As String)
+    ' 共用函數：檢查檔案並彈出 PDF 預覽視窗
     On Error GoTo ErrorHandler
     
-    Dim strPDFPath As String
-    
-    ' 1. 檢查是否有從外部傳入 OpenArgs (開啟引數)
-    If Not IsNull(Me.OpenArgs) Then
-        ' 接收傳進來的 PDF 路徑
-        strPDFPath = Me.OpenArgs
-        
-        ' 2. 將路徑轉交給瀏覽器控制項顯示
-        ' (加上 file:/// 可以確保相容性，並將反斜線替換為斜線)
-        Me.wbPDFViewer.ControlSource = "=""file:///" & Replace(strPDFPath, "\", "/") & """"
-        
-        ' 3. 貼心小功能：把表單的標題改成該 PDF 的檔名
-        Me.Caption = "PDF 預覽 - " & Mid(strPDFPath, InStrRev(strPDFPath, "\") + 1)
-    Else
-        ' 如果沒收到路徑，就關閉自己避免畫面空白
-        MsgBox "未接收到 PDF 檔案路徑！", vbExclamation, "系統提示"
-        DoCmd.Close acForm, Me.Name
+    ' 1. 基本防呆：檢查路徑是否為空
+    If Trim(strPath) = "" Then
+        MsgBox "請提供 PDF 檔案路徑！", vbExclamation, "提示"
+        Exit Sub
     End If
     
+    ' 2. 檢查實體檔案到底存不存在
+    If Dir(strPath) = "" Then
+        MsgBox "找不到指定的 PDF 檔案！" & vbCrLf & "路徑: " & strPath, vbExclamation, "檔案遺失"
+        Exit Sub
+    End If
+    
+    ' 3. 呼叫專屬表單，並透過 OpenArgs 把路徑傳過去！
+    ' acWindowNormal 代表正常開啟，您也可以改成 acDialog 強迫使用者看完必須關閉
+    DoCmd.OpenForm "frmPDFViewer", WindowMode:=acWindowNormal, OpenArgs:=strPath
+    
     Exit Sub
-
+    
 ErrorHandler:
-    MsgBox "載入 PDF 畫面時發生錯誤！" & vbCrLf & Err.Description, vbCritical, "錯誤"
+    MsgBox "開啟 PDF 視窗時發生錯誤！" & vbCrLf & Err.Description, vbCritical, "系統錯誤"
 End Sub
