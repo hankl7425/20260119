@@ -1,31 +1,22 @@
-' =====================================================================
-' 放在模組最上方的宣告區 (General Declarations)
-' 這個變數只要 Access 沒關閉，就會一直活在記憶體裡
-' =====================================================================
-Private g_strCachedPassword As String 
-
-
-' =====================================================================
-' 取代原本直接呼叫解密的主函數
-' =====================================================================
-Public Function GetOptimizedPassword(ByVal strUserID As String) As String
-    ' 1. 【極速讀取】：如果記憶體裡已經有密碼了，直接回傳，瞬間完成！
-    If g_strCachedPassword <> "" Then
-        GetOptimizedPassword = g_strCachedPassword
-        Exit Function
+Private Sub btnOpenPDF_Click()
+    ' 宣告變數來存放 PDF 的檔案路徑
+    Dim strPDFPath As String
+    
+    ' 將這裡替換成您實際的 PDF 檔案路徑 (也可以替換成讀取某個欄位的值)
+    strPDFPath = "C:\TestFolder\MyReport.pdf" 
+    
+    On Error GoTo ErrorHandler
+    
+    ' 1. 先檢查檔案到底存不存在，避免程式報錯
+    If Dir(strPDFPath) <> "" Then
+        ' 2. 檔案存在，直接呼叫預設程式開啟
+        Application.FollowHyperlink strPDFPath
+    Else
+        MsgBox "找不到指定的 PDF 檔案！" & vbCrLf & "路徑: " & strPDFPath, vbExclamation, "檔案遺失"
     End If
     
-    ' 2. 【初次載入】：如果記憶體是空的，代表是第一次執行，才去跑慢吞吞的解密
-    Dim strFullConn As String
-    
-    ' 呼叫我們之前寫好的 PowerShell 解密函數 (這行會跑個 1~2 秒)
-    strFullConn = GetDSNUserIDPwd(strUserID) 
-    
-    ' 呼叫我們寫好的密碼萃取函數，只把密碼抽出來
-    ' 並把結果存進全域變數 g_strCachedPassword 裡面「記住」
-    g_strCachedPassword = ExtractPassword(strFullConn)
-    
-    ' 3. 回傳剛剛辛苦解密出來的密碼
-    GetOptimizedPassword = g_strCachedPassword
-    
-End Function
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "開啟 PDF 時發生錯誤！" & vbCrLf & Err.Description, vbCritical, "錯誤"
+End Sub
