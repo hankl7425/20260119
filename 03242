@@ -1,25 +1,25 @@
-Public Sub OpenPDFWindow(ByVal strPath As String)
-    ' 共用函數：檢查檔案並彈出 PDF 預覽視窗
+Public Sub ReconnectWithoutLoop()
     On Error GoTo ErrorHandler
     
-    ' 1. 基本防呆：檢查路徑是否為空
-    If Trim(strPath) = "" Then
-        MsgBox "請提供 PDF 檔案路徑！", vbExclamation, "提示"
-        Exit Sub
+    Dim strConn As String
+    
+    ' 這裡放入您解密後的完整連線字串 (必須包含 ODBC; 開頭)
+    ' 範例: strConn = "ODBC;DRIVER={SQL Server};SERVER=您的伺服器IP;DATABASE=您的資料庫;UID=您的帳號;PWD=您的密碼;"
+    strConn = "ODBC;DSN=您的DSN名稱;UID=您的帳號;PWD=您的密碼;" 
+    
+    ' 如果之前已經打開過，先關閉
+    If Not g_dbCache Is Nothing Then
+        g_dbCache.Close
+        Set g_dbCache = Nothing
     End If
     
-    ' 2. 檢查實體檔案到底存不存在
-    If Dir(strPath) = "" Then
-        MsgBox "找不到指定的 PDF 檔案！" & vbCrLf & "路徑: " & strPath, vbExclamation, "檔案遺失"
-        Exit Sub
-    End If
+    ' ★ 效能魔法就在這一行：只開一個隱藏的連線，Access 就會記住密碼！
+    ' 參數說明：("", False, False, 連線字串)
+    Set g_dbCache = DBEngine.Workspaces(0).OpenDatabase("", False, False, strConn)
     
-    ' 3. 呼叫專屬表單，並透過 OpenArgs 把路徑傳過去！
-    ' acWindowNormal 代表正常開啟，您也可以改成 acDialog 強迫使用者看完必須關閉
-    DoCmd.OpenForm "frmPDFViewer", WindowMode:=acWindowNormal, OpenArgs:=strPath
-    
+    MsgBox "資料庫連線已瞬間更新完成！", vbInformation, "系統提示"
     Exit Sub
     
 ErrorHandler:
-    MsgBox "開啟 PDF 視窗時發生錯誤！" & vbCrLf & Err.Description, vbCritical, "系統錯誤"
+    MsgBox "更新連線失敗！" & vbCrLf & Err.Description, vbCritical, "錯誤"
 End Sub
