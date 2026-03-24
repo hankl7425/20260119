@@ -1,0 +1,127 @@
+Public Sub ROpen(rst As ADODB.Recordset, strSQL As String, _
+                 Optional CursorType As ADODB.CursorTypeEnum = adOpenKeyset, _
+                 Optional LockType As ADODB.LockTypeEnum = adLockOptimistic)
+    
+    ' 啟用標準錯誤攔截，取代會吃掉錯誤訊息的 On Error Resume Next
+    On Error GoTo ErrorHandler
+    
+    ' 確保 Recordset 是關閉狀態，避免重複開啟導致報錯
+    If rst.State = adStateOpen Then rst.Close
+    
+    ' 根據傳入的資料庫類型開啟連線 (保留您原本的 ORACLE 判斷邏輯)
+    ' 這裡會自動帶入您指定的游標與鎖定類型，若沒指定則套用預設值
+    If strDBtype = "ORACLE" Then
+        rst.Open strSQL, CN2, CursorType, LockType
+    Else
+        rst.Open strSQL, CN, CursorType, LockType
+    End If
+    
+    Exit Sub
+    
+ErrorHandler:
+    ' 當 SQL 語法寫錯或資料庫斷線時，會跳出明確提示，大幅節省您未來除錯的時間
+    MsgBox "資料庫查詢發生錯誤！" & vbCrLf & _
+           "錯誤代碼: " & Err.Number & vbCrLf & _
+           "錯誤說明: " & Err.Description & vbCrLf & _
+           "SQL語法: " & strSQL, vbCritical, "ROpen 錯誤"
+End Sub
+Sub FillDBListSQL(strTablename As String)
+    '將 SQL Server 合併報表舊資料讀入，並填入 List Box 中 (ADO Recordset 綁定版)
+    On Error GoTo ErrorHandler
+    
+    Dim rstSetting As New ADODB.Recordset
+    Dim rstData As New ADODB.Recordset ' 專門用來綁定資料的 Recordset
+    Dim strKey As String
+    Dim strSort As String
+    Dim strLength As String
+    Dim strSelectFields As String
+    Dim strSQL As String
+    Dim strSettingSQL As String
+    Dim intColumnCount As Integer
+    
+    ' 初始化變數
+    intColumnCount = 0
+    strSelectFields = ""
+    strLength = ""
+    strSort = ""
+
+    '======================================================
+    ' 1. 讀取 SQL Server 上的欄位設定表
+    '======================================================
+    strSettingSQL = "Select ColumnName, Caption, ShowFlag, SortOrder From tCopyTableDetail Where TableName='" & strTablename & "' Order By DisplayOrder"
+    
+    ' 讀取設定只要用唯讀單向模式即可 (adOpenForwardOnly=0, adLockReadOnly=1)
+    ROpen rstSetting, strSettingSQL, 0, 1
+    
+    If rstSetting.EOF Then
+        rstSetting.Close
+        Exit Sub
+    End If
+    
+    Do While Not rstSetting.EOF
+        ' 取得搜尋主鍵
+        If Nz(rstSetting.Fields("ShowFlag").Value, "") = "K" Then
+            strKey = rstSetting.Fields("ColumnName").Value
+        End If
+        
+        ' 取得排序欄位
+        If Nz(rstSetting.Fields("SortOrder").Value, 0) > 0 Then
+            strSort = strSort & rstSetting.Fields("ColumnName").Value & " Desc,"
+        End If
+        
+        ' 取得顯示欄位
+        If Nz(rstSetting.Fields("ShowFlag").Value, "") = "Y" Then
+            intColumnCount = intColumnCount + 1
+            ' 利用 SQL 的 AS 語法，讓回傳的欄位名稱直接變成「標題」
+            strSelectFields = strSelectFields & "[" & rstSetting.Fields("ColumnName").Value & "] AS [" & Nz(rstSetting.Fields("Caption").Value, "") & "], "
+            ' 計算寬度
+            strLength = strLength & (Len(Nz(rstSetting.Fields("Caption").Value, "")) * 0.5) & " cm;"
+        End If
+        
+        rstSetting.MoveNext
+    Loop
+    rstSetting.Close
+    
+    If intColumnCount = 0 Then Exit Sub
+    
+    '======================================================
+    ' 2. 處理 SQL 語法的字尾與條件
+    '======================================================
+    strSelectFields = Left(strSelectFields, Len(strSelectFields) - 2)
+    
+    If Len(strSort) > 0 Then
+        strSort = " Order By " & Left(strSort, Len(strSort) - 1)
+    End If
+    
+    ' 組合出要發送給 SQL Server 的語法
+    strSQL = "Select Top 150 " & strSelectFields & " From " & strTablename & " Where " & strKey & "='" & Me.txtBAN & "' " & strSort
+
+    '======================================================
+    ' 3. 開啟 Recordset 並「直接綁定」到 ListBox
+    '======================================================
+    ' ★ 重要關鍵：Access 規定要綁定給畫面的 ADO Recordset，游標位置必須在「用戶端 (adUseClient)」
+    rstData.CursorLocation = 3 ' adUseClient = 3
+    
+    ' 以靜態游標(adOpenStatic=3)與唯讀(adLockReadOnly=1)開啟，效能最好
+    ROpen rstData, strSQL, 3, 1
+    
+    With Me.lstDataListSQL
+        .RowSourceType = "Table/Query"
+        .ColumnCount = intColumnCount
+        .ColumnHeads = True        ' 因為我們前面用了 AS [標題]，這裡設為 True 就會自動抓取當作標題列
+        .ColumnWidths = strLength
+        
+        ' ★ 終極效能魔法：把有資料的 Recordset 直接塞進去，完全免除字串串接！
+        Set .Recordset = rstData
+    End With
+    
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "載入資料庫清單發生錯誤！" & vbCrLf & _
+           "錯誤說明: " & Err.Description & vbCrLf & _
+           "SQL語法: " & strSQL, vbCritical, "FillDBListSQL 錯誤"
+           
+    If rstSetting.State = 1 Then rstSetting.Close
+    If rstData.State = 1 Then rstData.Close
+End Sub
