@@ -1,0 +1,40 @@
+WITH DELETED_SN AS (
+    -- 先將三張表的 SN 整合，並去重以提升 Join 效能
+    SELECT sn FROM jcic.egt50t
+    UNION 
+    SELECT sn FROM jcic.egt51t
+    UNION 
+    SELECT sn FROM jcic.egt52t
+),
+FILTERED_R AS (
+    -- 在內層就先過濾時間與狀態，減少 Window Function 的計算負擔
+    SELECT 
+        0 as tmp, AUTH_SN, BANK_CODE, STATUS, 
+        SUBSTR(IDN_BAN, 1, 4) || '********' AS IDN_BAN,
+        QUERY_ITEM, int(QUERY_KIND) as q_kind,
+        INSERT_TIME, UPDATE_TIME, QUERY_WAY, SN,
+        ROW_NUMBER() OVER (PARTITION BY sn ORDER BY QUERY_KIND DESC) as rn,
+        -- 原本的 CASE WHEN TIME 邏輯
+        CASE WHEN TIME(insert_time) BETWEEN '01:00:00' AND '02:00:00' THEN '*' ELSE '' END as time_mark
+    FROM jcic.egv00t
+    WHERE insert_time BETWEEN '2026-03-01 00:00:00' AND '2026-04-17 23:59:59'
+      AND status LIKE 'F%' -- 假設原語法最後是過濾 F%
+)
+SELECT 
+    RES.*,
+    AB.NAME
+FROM (
+    SELECT 
+        R.*,
+        -- 使用 LEFT JOIN 的結果來判斷 DELETE 狀態
+        -- 如果 D.sn IS NULL，代表三張表中都沒有這筆 SN，對應原本的 'Y'
+        CASE WHEN D.sn IS NOT NULL THEN 'N' ELSE 'Y' END AS "DELETE",
+        MAX(R.time_mark) OVER (PARTITION BY R.sn) as AUTO
+    FROM FILTERED_R R
+    LEFT JOIN DELETED_SN D ON R.sn = D.sn
+    WHERE R.rn = 1
+) RES
+JOIN jcic.ab530t AB ON AB.BANK_CODE = RES.BANK_CODE
+WHERE RES."DELETE" = 'N' 
+-- 原本最後的過濾條件
+
