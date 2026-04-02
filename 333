@@ -1,14 +1,36 @@
+WITH DELETED_SN AS (
+    SELECT sn FROM jcic.egt50t
+    UNION 
+    SELECT sn FROM jcic.egt51t
+    UNION 
+    SELECT sn FROM jcic.egt52t
+),
+FILTERED_R AS (
+    SELECT 
+        -- ... 其他欄位保持不變 ...
+        QUERY_KIND, 
+        -- 將原本的 CASE 邏輯獨立出來，方便後面合併
+        CASE WHEN TIME(insert_time) BETWEEN '01:00:00' AND '02:00:00' THEN '*' ELSE '' END as time_mark,
+        SN, BANK_CODE, INSERT_TIME, STATUS, 
+        ROW_NUMBER() OVER (PARTITION BY sn ORDER BY QUERY_KIND DESC) as rn
+    FROM jcic.egv00t
+    WHERE insert_time BETWEEN '2026-03-01 00:00:00' AND '2026-04-17 23:59:59'
+      AND status LIKE 'F%'
+)
 SELECT 
-    t1.Sn, 
-    t1.id, 
-    t1.time, 
-    t1.status
-FROM your_table_name t1
-INNER JOIN (
-    -- 讓 DB2 先有效率地找出每個 Sn 的最大 id
-    SELECT Sn, MAX(id) as max_id
-    FROM your_table_name
-    GROUP BY Sn
-) t2 ON t1.Sn = t2.Sn AND t1.id = t2.max_id
-WHERE t1.status = 'F'
-  AND t1.time >= CURRENT TIMESTAMP - 28 HOURS;
+    RES.*,
+    AB.NAME
+FROM (
+    SELECT 
+        R.*,
+        -- 【關鍵改法】：將原本的欄位與 Window Function 的結果串接
+        -- 這裡會產生如 '1*' 或 '2' (後面接空字串) 的結果
+        TRIM(CAST(R.QUERY_KIND AS CHAR(5))) || MAX(R.time_mark) OVER (PARTITION BY R.sn) AS NEW_QUERY_KIND,
+        
+        CASE WHEN D.sn IS NOT NULL THEN 'N' ELSE 'Y' END AS "DELETE"
+    FROM FILTERED_R R
+    LEFT JOIN DELETED_SN D ON R.sn = D.sn
+    WHERE R.rn = 1
+) RES
+JOIN jcic.ab530t AB ON AB.BANK_CODE = RES.BANK_CODE
+WHERE RES."DELETE" = 'N'
