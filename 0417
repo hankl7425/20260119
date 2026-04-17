@@ -1,66 +1,25 @@
-using System;
-using System.Data;
-using IBM.Data.Db2;
-
-public class DynamicDataGenerator
-{
-    public void GenerateToDynamicTable(string connectionString, string tableName)
-    {
-        using (DB2Connection conn = new DB2Connection(connectionString))
-        {
-            conn.Open();
-
-            // --- 第一步：動態抓取資料表結構 ---
-            DataTable schemaTable = new DataTable();
-            DB2DataAdapter adapter = new DB2DataAdapter($"SELECT * FROM {tableName} WHERE 1=0", conn);
-            adapter.FillSchema(schemaTable, SchemaType.Source); 
-            // 現在 schemaTable 已經有 DB2 那張表的所有欄位定義了
-
-            int totalRecords = 1_000_000;
-            int batchSize = 100_000;
-            Random random = new Random();
-            DateTime now = DateTime.Now;
-            int thirtyDaysInSeconds = 30 * 24 * 60 * 60;
-
-            for (int i = 1; i <= totalRecords; i++)
-            {
-                DataRow row = schemaTable.NewRow();
-
-                // --- 第二步：動態填入資料 ---
-                foreach (DataColumn col in schemaTable.Columns)
-                {
-                    // 根據欄位名稱或型別來決定填入什麼
-                    string colName = col.ColumnName.ToUpper();
-
-                    if (colName == "SN") 
-                    {
-                        row[col] = i;
-                    }
-                    else if (col.DataType == typeof(DateTime))
-                    {
-                        int randomOffset = random.Next(0, thirtyDaysInSeconds);
-                        row[col] = now.AddSeconds(-randomOffset);
-                    }
-                    else if (col.DataType == typeof(string))
-                    {
-                        row[col] = "Test_" + i;
-                    }
-                    // 其他欄位若沒處理，預設會是 DBNull
-                }
-                schemaTable.Rows.Add(row);
-
-                // --- 第三步：分批寫入 ---
-                if (i % batchSize == 0 || i == totalRecords)
-                {
-                    using (DB2BulkCopy bulkCopy = new DB2BulkCopy(conn))
-                    {
-                        bulkCopy.DestinationTableName = tableName;
-                        bulkCopy.WriteToServer(schemaTable);
-                    }
-                    schemaTable.Clear();
-                    Console.WriteLine($"已動態寫入 {i} 筆至 {tableName}...");
-                }
-            }
-        }
-    }
-}
+WITH RawData AS (
+    -- 這裡放你原本 R 的邏輯
+    SELECT 0 as tmp, AUTH_SN, BANK_CODE, STATUS, 
+           SUBSTR(IDN_BAN,1,4)||'*********' AS IDN_BAN,
+           QUERY_ITEM, 
+           int(QUERY_KIND) || MAX(CASE WHEN int(QUERY_KIND)>0 AND TIME(insert_time) BETWEEN '01:00:00' and '02:00:00' then '*' else '' end) over(PARTITION by sn) as query_kind,
+           QUERY_TIME, INSERT_TIME, UPDATE_TIME, QUERY_WAY, SN,
+           ROW_NUMBER() OVER (PARTITION BY sn order by query_kind desc) as rn
+    FROM jcic.egv00t
+),
+TaggedData AS (
+    -- 在這一層統一計算 Y/N，DB2 優化器會針對這三張表與 R 做 Semi-Join
+    SELECT R.*, 
+           CASE WHEN EXISTS (SELECT 1 from jcic.egt50t T50 where T50.sn=R.SN)
+                 OR EXISTS (SELECT 1 from jcic.egt51t T51 where T51.sn=R.SN)
+                 OR EXISTS (SELECT 1 from jcic.egt52t T52 where T52.sn=R.SN) 
+                THEN 'N' ELSE 'Y' END AS DELETE_FLAG
+    FROM RawData R
+    WHERE R.rn = 1 
+      AND R.insert_time BETWEEN '2026-01-01 00:00:00' AND '2026-04-16 23:59:59'
+)
+SELECT T.*, AB.name
+FROM TaggedData T
+JOIN jcic.ab530t AB ON AB.BANK_CODE = T.BANK_CODE
+WHERE T.DELETE_FLAG LIKE 'Y%' -- 這裡直接過濾算好的標籤，不再重複執行 EXISTS
