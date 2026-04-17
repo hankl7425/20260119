@@ -1,0 +1,66 @@
+using System;
+using System.Data;
+using IBM.Data.Db2;
+
+public class DynamicDataGenerator
+{
+    public void GenerateToDynamicTable(string connectionString, string tableName)
+    {
+        using (DB2Connection conn = new DB2Connection(connectionString))
+        {
+            conn.Open();
+
+            // --- 第一步：動態抓取資料表結構 ---
+            DataTable schemaTable = new DataTable();
+            DB2DataAdapter adapter = new DB2DataAdapter($"SELECT * FROM {tableName} WHERE 1=0", conn);
+            adapter.FillSchema(schemaTable, SchemaType.Source); 
+            // 現在 schemaTable 已經有 DB2 那張表的所有欄位定義了
+
+            int totalRecords = 1_000_000;
+            int batchSize = 100_000;
+            Random random = new Random();
+            DateTime now = DateTime.Now;
+            int thirtyDaysInSeconds = 30 * 24 * 60 * 60;
+
+            for (int i = 1; i <= totalRecords; i++)
+            {
+                DataRow row = schemaTable.NewRow();
+
+                // --- 第二步：動態填入資料 ---
+                foreach (DataColumn col in schemaTable.Columns)
+                {
+                    // 根據欄位名稱或型別來決定填入什麼
+                    string colName = col.ColumnName.ToUpper();
+
+                    if (colName == "SN") 
+                    {
+                        row[col] = i;
+                    }
+                    else if (col.DataType == typeof(DateTime))
+                    {
+                        int randomOffset = random.Next(0, thirtyDaysInSeconds);
+                        row[col] = now.AddSeconds(-randomOffset);
+                    }
+                    else if (col.DataType == typeof(string))
+                    {
+                        row[col] = "Test_" + i;
+                    }
+                    // 其他欄位若沒處理，預設會是 DBNull
+                }
+                schemaTable.Rows.Add(row);
+
+                // --- 第三步：分批寫入 ---
+                if (i % batchSize == 0 || i == totalRecords)
+                {
+                    using (DB2BulkCopy bulkCopy = new DB2BulkCopy(conn))
+                    {
+                        bulkCopy.DestinationTableName = tableName;
+                        bulkCopy.WriteToServer(schemaTable);
+                    }
+                    schemaTable.Clear();
+                    Console.WriteLine($"已動態寫入 {i} 筆至 {tableName}...");
+                }
+            }
+        }
+    }
+}
