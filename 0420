@@ -1,0 +1,14 @@
+$(document).ready(function() {
+    // 使用 ID 結尾選取器，確保抓到 ASP.NET 渲染後的 ID
+    $('[id$="btnQuery"], [id$="btnSend"]').on('click', function() {
+        console.log("Button clicked via jQuery!");
+        // 呼叫顯示 Modal 的邏輯
+        $('#modal-1').prop('checked', true); 
+        
+        // 如果是 alert 測試
+        // alert('123'); 
+        
+        return true; // 讓後端事件繼續執行
+    });
+});
+
