@@ -1,0 +1,31 @@
+Private Sub Form_Load()
+    On Error GoTo ErrorHandler
+    
+    Dim strPDFPath As String
+    
+    ' 1. 檢查是否有從外部傳入路徑
+    If Not IsNull(Me.OpenArgs) Then
+        strPDFPath = Me.OpenArgs
+        
+        ' 2. 智慧判斷路徑類型並賦予給瀏覽器
+        If Left(strPDFPath, 2) = "\\" Then
+            ' 【網路芳鄰路徑】直接把 UNC 路徑餵給瀏覽器即可，不需要加 file:///
+            Me.wbPDFViewer.ControlSource = "=""" & strPDFPath & """"
+        Else
+            ' 【本機磁碟路徑】加上 file:/// 並轉換斜線方向，確保相容性
+            Me.wbPDFViewer.ControlSource = "=""file:///" & Replace(strPDFPath, "\", "/") & """"
+        End If
+        
+        ' 3. 貼心小功能：把表單的標題改成該 PDF 的檔名
+        Me.Caption = "PDF 預覽 - " & Mid(strPDFPath, InStrRev(strPDFPath, "\") + 1)
+    Else
+        MsgBox "未接收到 PDF 檔案路徑！", vbExclamation, "系統提示"
+        DoCmd.Close acForm, Me.Name
+    End If
+    
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "載入 PDF 畫面時發生錯誤！" & vbCrLf & Err.Description, vbCritical, "錯誤"
+End Sub
+
