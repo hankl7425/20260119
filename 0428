@@ -1,0 +1,57 @@
+Public Sub OpenPDFWindow(ByVal strPath As String)
+    On Error GoTo ErrorHandler
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    If Trim(strPath) = "" Then Exit Sub
+    
+    ' ★ 改用 FSO 檢查檔案，對網路芳鄰路徑更精準、更具包容性
+    If Not fso.FileExists(strPath) Then
+        MsgBox "找不到指定的 PDF 檔案！" & vbCrLf & "路徑: " & strPath, vbExclamation, "檔案遺失"
+        Set fso = Nothing
+        Exit Sub
+    End If
+    Set fso = Nothing
+    
+    DoCmd.OpenForm "frmPDFViewer", WindowMode:=acWindowNormal, OpenArgs:=strPath
+    Exit Sub
+ErrorHandler:
+    MsgBox "開啟錯誤: " & Err.Description
+End Sub
+
+Private Sub Form_Load()
+    On Error GoTo ErrorHandler
+    Dim strPDFPath As String
+    Dim strURL As String
+    
+    If Not IsNull(Me.OpenArgs) Then
+        strPDFPath = Me.OpenArgs
+        
+        ' 1. 將所有的「反斜線 \」統一轉成網頁看得懂的「正斜線 /」
+        strURL = Replace(strPDFPath, "\", "/")
+        
+        ' 2. 智慧判斷路徑並加上正確的 file 協定
+        If Left(strURL, 2) = "//" Then
+            ' 【網路芳鄰路徑】
+            ' 原始：//192.168.0.2/share/123.pdf
+            ' 轉換後：file://192.168.0.2/share/123.pdf (這才是瀏覽器承認的標準格式)
+            strURL = "file:" & strURL
+        Else
+            ' 【本機磁碟路徑】
+            ' 原始：C:/Test/123.pdf
+            ' 轉換後：file:///C:/Test/123.pdf
+            strURL = "file:///" & strURL
+        End If
+        
+        ' 3. 將最終完美的 URL 交給瀏覽器控制項
+        Me.wbPDFViewer.ControlSource = "=""" & strURL & """"
+        Me.Caption = "PDF 預覽 - " & Mid(strPDFPath, InStrRev(strPDFPath, "\") + 1)
+    Else
+        DoCmd.Close acForm, Me.Name
+    End If
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "載入 PDF 畫面時發生錯誤！" & vbCrLf & Err.Description, vbCritical, "錯誤"
+End Sub
+
