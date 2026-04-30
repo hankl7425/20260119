@@ -1,0 +1,36 @@
+Select R.*, AB.name,
+       CASE WHEN EXISTS (SELECT 1 from jcic.egt50t T50 where T50.sn=R.SN)
+            OR EXISTS (SELECT 1 from jcic.egt51t T51 where T51.sn=R.SN)
+            OR EXISTS (SELECT 1 from jcic.egt52t T52 where T52.sn=R.SN) THEN 'N' ELSE 'Y' END AS DELETE
+from (
+    select 0 as tmp, AUTH_SN, BANK_CODE, STATUS, SUBSTR(IDN_BAN,1,4)||'*********' AS IDN_BAN,
+           QUERY_ITEM,
+           
+           -- 修正 1：用 EXISTS 子查詢取代 MAX() OVER()，跨越時間限制去尋找紀錄
+           int(QUERY_KIND) || 
+           CASE WHEN EXISTS (
+               SELECT 1 FROM jcic.egv00t sub
+               WHERE sub.SN = main.SN
+                 AND int(sub.QUERY_KIND) > 0 
+                 AND TIME(sub.insert_time) BETWEEN '01:00:00' AND '02:00:00'
+           ) THEN '*' ELSE '' END as query_kind,
+           
+           QUERY_TIME, INSERT_TIME, UPDATE_TIME, QUERY_WAY, SN,
+           
+           -- 修正 2：因為 query_kind 變成包含子查詢的字串，直接改用 int(QUERY_KIND) 排序以避免解析錯誤
+           ROW_NUMBER() OVER (PARTITION BY sn order by int(QUERY_KIND) desc ) as rn,
+           
+           CASE WHEN TIME(insert_time) BETWEEN '01:00:00' and '02:00:00' then '*' else '' end as AUTO
+           
+    from jcic.egv00t main  -- 加入 main 別名以供上方子查詢對應
+    where insert_time between '2026-04-29 00:00:00' and '2026-04-30 23:59:59'
+) as R 
+join jcic.ab530t AB on AB.BANK_CODE=R.BANK_CODE
+where R.rn = 1          
+  and R.bank_code like '%' 
+  and query_item like '%'
+  and status like '%' 
+  and CASE WHEN EXISTS (SELECT 1 from jcic.egt50t T50 where T50.sn=R.SN)
+           OR EXISTS (SELECT 1 from jcic.egt51t T51 where T51.sn=R.SN)
+           OR EXISTS (SELECT 1 from jcic.egt52t T52 where T52.sn=R.SN) THEN 'N' ELSE 'Y' END like '%'
+
