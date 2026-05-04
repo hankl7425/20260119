@@ -1,0 +1,43 @@
+Private Sub Form_Load()
+    On Error GoTo ErrorHandler
+    
+    Dim strNetPath As String
+    Dim strLocalTempPath As String
+    Dim fso As Object
+    
+    ' 1. 這裡請務必補上您的「共用資料夾名稱」！
+    ' 範例：如果檔案在 share 資料夾裡
+    strNetPath = "\\192.168.0.2\share\123.pdf" 
+    
+    ' 如果是從 OpenArgs 傳過來的，請用這行取代上面那行
+    ' If Not IsNull(Me.OpenArgs) Then strNetPath = Me.OpenArgs
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ' 2. 檢查網路上的檔案到底存不存在
+    If Not fso.FileExists(strNetPath) Then
+        MsgBox "在網路上找不到指定的 PDF 檔案！" & vbCrLf & "路徑: " & strNetPath, vbExclamation
+        DoCmd.Close acForm, Me.Name
+        Exit Sub
+    End If
+    
+    ' 3. 取得本機使用者的 Temp 暫存資料夾路徑，並組合出暫存檔名
+    strLocalTempPath = Environ("TEMP") & "\AccessTempView_" & fso.GetFileName(strNetPath)
+    
+    ' 4. 將網路上的檔案默默複製到本機暫存區 (True 代表強制覆蓋舊的暫存檔)
+    fso.CopyFile strNetPath, strLocalTempPath, True
+    
+    ' 5. 清空 ControlSource 並使用 Navigate 開啟「本機端」的 PDF！
+    Me.wbPDFViewer.ControlSource = ""
+    
+    ' 由於現在是純粹的本機 C 槽路徑，直接 Navigate 絕對能成功打開
+    Me.wbPDFViewer.Object.Navigate strLocalTempPath
+    
+    ' 釋放物件
+    Set fso = Nothing
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "載入 PDF 畫面時發生錯誤！" & vbCrLf & Err.Description, vbCritical, "錯誤"
+End Sub
+
