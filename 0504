@@ -1,0 +1,49 @@
+Private Sub Form_Load()
+    Dim strSource As String
+    Dim strDest   As String
+    
+    strSource = "\\192.168.0.2\share\123.pdf"
+    strDest   = "D:\temp\123.pdf"
+    
+    ' 確認來源檔案存在
+    If Dir(strSource) = "" Then
+        MsgBox "找不到來源檔案：" & strSource, vbExclamation, "錯誤"
+        Exit Sub
+    End If
+    
+    ' 確認目標資料夾存在，不存在就建立
+    If Dir("D:\temp", vbDirectory) = "" Then
+        MkDir "D:\temp"
+    End If
+    
+    ' 複製檔案
+    FileCopy strSource, strDest
+    
+    ' 修改權限：Users 群組完全控制
+    SetFullControlForUsers strDest
+    
+    ' 開啟 PDF
+    Dim strURL As String
+    strURL = "file:///D:/temp/123.pdf"
+    Me.WebBrowser1.Navigate strURL
+End Sub
+
+' ─────────────────────────────────────────
+' 用 icacls 指令設定 Users 完全控制
+' ─────────────────────────────────────────
+Private Sub SetFullControlForUsers(filePath As String)
+    Dim strCmd As String
+    
+    ' /grant "Users:(F)"  → Users 群組完全控制
+    ' *請注意：中文系統的 Users 群組名稱可能是「使用者」
+    strCmd = "cmd /c icacls """ & filePath & """ /grant Users:(F)"
+    
+    Shell strCmd, vbHide
+End Sub
+
+Private Sub Form_Close()
+    ' 關閉時刪除暫存檔
+    If Dir("D:\temp\123.pdf") <> "" Then
+        Kill "D:\temp\123.pdf"
+    End If
+End Sub
