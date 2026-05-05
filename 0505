@@ -1,0 +1,167 @@
+Option Compare Database
+Option Explicit
+
+Private Const PDF_BASE_PATH As String = "\\192.168.128.150\volume1\FSOCR\share\SyncMainReportFile\"
+
+' =============================================
+' 表單載入時初始化 Adobe PDF 控件
+' =============================================
+Private Sub Form_Load()
+    With Me.AcroPDF1
+        .SetShowToolbar True
+        .SetShowScrollbars True
+        .SetView "FitH"
+    End With
+End Sub
+
+' =============================================
+' 開啟按鈕
+' =============================================
+Private Sub btnOpenPDF_Click()
+    Dim strFileName As String
+    Dim strFullPath As String
+
+    strFileName = Trim(Nz(Me.txtFileName.Value, ""))
+
+    If strFileName = "" Then
+        MsgBox "請輸入檔案名稱！", vbExclamation, "提示"
+        Me.txtFileName.SetFocus
+        Exit Sub
+    End If
+
+    ' 自動補 .pdf
+    If LCase(Right(strFileName, 4)) <> ".pdf" Then
+        strFileName = strFileName & ".pdf"
+    End If
+
+    strFullPath = PDF_BASE_PATH & strFileName
+
+    ' 檢查檔案存在
+    If Dir(strFullPath) = "" Then
+        MsgBox "找不到檔案：" & vbCrLf & vbCrLf & strFullPath, vbCritical, "檔案不存在"
+        Exit Sub
+    End If
+
+    ' 載入 PDF 到 Adobe 控件
+    Call LoadPDF(strFullPath)
+End Sub
+
+' =============================================
+' 載入 PDF 核心函數
+' =============================================
+Private Sub LoadPDF(strPath As String)
+    On Error GoTo ErrHandler
+
+    With Me.AcroPDF1
+        .LoadFile strPath
+        .SetView "FitH"          ' FitH=符合寬度 / FitV=符合高度 / Fit=整頁
+        .SetShowToolbar True
+        .SetShowScrollbars True
+        .SetLayoutMode 1         ' 1=單頁, 2=連續, 3=連續對頁
+        .SetPageMode 1           ' 1=無書籤面板, 4=顯示書籤面板
+    End With
+
+    ' 顯示目前檔名在標籤
+    Me.lblCurrentFile.Caption = "目前檔案：" & strPath
+    Exit Sub
+
+ErrHandler:
+    MsgBox "PDF 載入失敗！" & vbCrLf & vbCrLf & _
+           "錯誤：" & Err.Description & vbCrLf & vbCrLf & _
+           "請確認已安裝 Adobe Acrobat Reader。", _
+           vbCritical, "錯誤"
+End Sub
+
+' =============================================
+' Enter 鍵觸發開啟
+' =============================================
+Private Sub txtFileName_KeyPress(KeyAscii As Integer)
+    If KeyAscii = 13 Then Call btnOpenPDF_Click
+End Sub
+
+' =============================================
+' 頁面控制：上一頁
+' =============================================
+Private Sub btnPrevPage_Click()
+    On Error Resume Next
+    Me.AcroPDF1.gotoPreviousPage
+End Sub
+
+' =============================================
+' 頁面控制：下一頁
+' =============================================
+Private Sub btnNextPage_Click()
+    On Error Resume Next
+    Me.AcroPDF1.gotoNextPage
+End Sub
+
+' =============================================
+' 頁面控制：跳至指定頁
+' =============================================
+Private Sub btnGoToPage_Click()
+    Dim lngPage As Long
+
+    If Not IsNumeric(Me.txtPageNum.Value) Then
+        MsgBox "請輸入有效頁碼！", vbExclamation, "提示"
+        Exit Sub
+    End If
+
+    lngPage = CLng(Me.txtPageNum.Value)
+
+    On Error Resume Next
+    Me.AcroPDF1.setCurrentPage lngPage
+End Sub
+
+' =============================================
+' 縮放控制
+' =============================================
+Private Sub btnZoomIn_Click()
+    On Error Resume Next
+    Me.AcroPDF1.SetZoom Me.AcroPDF1.GetZoom + 10
+End Sub
+
+Private Sub btnZoomOut_Click()
+    On Error Resume Next
+    Me.AcroPDF1.SetZoom Me.AcroPDF1.GetZoom - 10
+End Sub
+
+Private Sub btnZoomFit_Click()
+    On Error Resume Next
+    Me.AcroPDF1.SetView "FitH"
+End Sub
+
+' =============================================
+' 列印
+' =============================================
+Private Sub btnPrint_Click()
+    On Error GoTo ErrPrint
+
+    With Me.AcroPDF1
+        .PrintAll           ' 列印全部頁面
+        ' .PrintAllFit      ' 列印全部並縮放符合紙張
+        ' .PrintPages 1, 3  ' 列印第1~3頁
+    End With
+    Exit Sub
+
+ErrPrint:
+    MsgBox "列印失敗：" & Err.Description, vbCritical, "錯誤"
+End Sub
+
+' =============================================
+' 清除 / 關閉 PDF
+' =============================================
+Private Sub btnClear_Click()
+    On Error Resume Next
+    Me.AcroPDF1.LoadFile ""
+    Me.lblCurrentFile.Caption = "目前檔案：（無）"
+    Me.txtFileName.Value = ""
+    Me.txtFileName.SetFocus
+End Sub
+
+' =============================================
+' 表單關閉時釋放控件
+' =============================================
+Private Sub Form_Close()
+    On Error Resume Next
+    Me.AcroPDF1.LoadFile ""
+End Sub
