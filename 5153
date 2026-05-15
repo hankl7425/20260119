@@ -1,0 +1,87 @@
+/// <summary>
+/// 匯入按鈕事件 (傳統 INSERT 版：A.TableA -> B.TableA)
+/// </summary>
+private void BtnImport_Click(object sender, EventArgs e)
+{
+    try
+    {
+        // 1. 取得來源資料庫 A 的資料
+        DataTable dtA = GetDataTable(connStrA, "SELECT * FROM TableA");
+
+        if (dtA.Rows.Count == 0)
+        {
+            MessageBox.Show("資料庫 A 的 TableA 沒有資料可供匯入。");
+            return;
+        }
+
+        // 2. 取得目的資料庫 B 的「空表結構」，單純用來知道 B 有哪些欄位
+        DataTable dtB_Schema = GetDataTable(connStrB, "SELECT TOP 0 * FROM TableA");
+
+        // 3. 找出兩邊都有的「共同欄位」
+        System.Collections.Generic.List<string> commonColumns = new System.Collections.Generic.List<string>();
+        foreach (DataColumn colA in dtA.Columns)
+        {
+            // 如果 A 的欄位，B 裡面也有，才加進清單
+            if (dtB_Schema.Columns.Contains(colA.ColumnName))
+            {
+                commonColumns.Add(colA.ColumnName);
+            }
+        }
+
+        if (commonColumns.Count == 0)
+        {
+            MessageBox.Show("兩個資料表沒有共通的欄位可以匯入！", "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        // 4. 動態組裝 INSERT 語法 (只組裝兩邊都有的欄位)
+        // 轉換出來的結果會像這樣：INSERT INTO TableA ([ID], [Name]) VALUES (@ID, @Name)
+        string colsStr = string.Join(", ", commonColumns.ConvertAll(c => $"[{c}]").ToArray());
+        string paramsStr = string.Join(", ", commonColumns.ConvertAll(c => $"@{c}").ToArray());
+        string insertSql = $"INSERT INTO TableA ({colsStr}) VALUES ({paramsStr})";
+
+        // 5. 傳統逐筆 INSERT 寫入資料庫 B
+        using (SqlConnection connB = new SqlConnection(connStrB))
+        {
+            connB.Open();
+            
+            // 使用 Transaction (交易) 包起來，執行速度會快很多，而且出錯時不會只寫入一半
+            using (SqlTransaction trans = connB.BeginTransaction())
+            {
+                using (SqlCommand cmd = new SqlCommand(insertSql, connB, trans))
+                {
+                    // 逐筆跑迴圈 INSERT
+                    foreach (DataRow row in dtA.Rows)
+                    {
+                        cmd.Parameters.Clear(); // 每次跑新的一筆前要清空參數
+                        
+                        foreach (string colName in commonColumns)
+                        {
+                            // 抓出值，如果來源剛好是 null，要轉成資料庫看懂的 DBNull.Value
+                            object val = row[colName];
+                            if (val == null) 
+                            {
+                                val = DBNull.Value;
+                            }
+                            
+                            cmd.Parameters.AddWithValue($"@{colName}", val);
+                        }
+                        
+                        cmd.ExecuteNonQuery(); // 執行這筆 INSERT
+                    }
+                }
+                trans.Commit(); // 全部跑完都沒出錯，才正式提交寫入
+            }
+        }
+
+        MessageBox.Show("資料匯入成功！", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        
+        // 6. 重新載入中間的表單 (DB_B 的 TableA)
+        dgvB_TableA.DataSource = GetDataTable(connStrB, "SELECT * FROM TableA");
+    }
+    catch (Exception ex)
+    {
+        MessageBox.Show($"匯入失敗:\n{ex.Message}", "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+    }
+}
+
