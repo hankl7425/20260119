@@ -1,0 +1,72 @@
+private void BtnImport_Click(object sender, EventArgs e)
+{
+    try
+    {
+        string tableAName = "tMainReport"; // 您原本的 TableA
+        string tableBName = "TableB";      // 您的 TableB
+        string pkName = "ID";             // 共用的主鍵欄位名稱
+        
+        DataTable dtA = GetDataTable(connStrA, $"SELECT * FROM {tableAName}");
+        if (dtA.Rows.Count == 0) return;
+
+        DataTable dtB_Schema = GetDataTable(connStrB, $"SELECT TOP 0 * FROM {tableAName}");
+
+        // 挑選共同欄位，並略過自動遞增 ID
+        var commonColumns = new System.Collections.Generic.List<string>();
+        foreach (DataColumn colA in dtA.Columns)
+        {
+            if (colA.ColumnName.Equals(pkName, StringComparison.OrdinalIgnoreCase)) continue;
+            if (dtB_Schema.Columns.Contains(colA.ColumnName)) commonColumns.Add(colA.ColumnName);
+        }
+
+        // 組裝 TableA 的語法 (包含 DataSource 欄位)
+        string colsA = string.Join(", ", commonColumns.ConvertAll(c => $"[{c}]").ToArray()) + ", [DataSource]";
+        string paramsA = string.Join(", ", commonColumns.ConvertAll(c => $"@{c}").ToArray()) + ", 2"; // 固定寫入 2
+        string sqlInsertA = $"INSERT INTO {tableAName} ({colsA}) VALUES ({paramsA}); SELECT SCOPE_IDENTITY();";
+
+        // 組裝 TableB 的語法 (僅寫入主鍵)
+        string sqlInsertB = $"INSERT INTO {tableBName} ([{pkName}]) VALUES (@NewID)";
+
+        using (SqlConnection connB = new SqlConnection(connStrB))
+        {
+            connB.Open();
+            using (SqlTransaction trans = connB.BeginTransaction())
+            {
+                try
+                {
+                    foreach (DataRow row in dtA.Rows)
+                    {
+                        // 1. 寫入 TableA 並取得產生的新 ID
+                        object newId;
+                        using (SqlCommand cmdA = new SqlCommand(sqlInsertA, connB, trans))
+                        {
+                            cmdA.Parameters.Clear();
+                            foreach (string colName in commonColumns)
+                            {
+                                cmdA.Parameters.AddWithValue($"@{colName}", row[colName] ?? DBNull.Value);
+                            }
+                            newId = cmdA.ExecuteScalar(); // 取得新產生的編號
+                        }
+
+                        // 2. 使用該 ID 寫入 TableB
+                        using (SqlCommand cmdB = new SqlCommand(sqlInsertB, connB, trans))
+                        {
+                            cmdB.Parameters.AddWithValue("@NewID", newId);
+                            cmdB.ExecuteNonQuery();
+                        }
+                    }
+                    trans.Commit();
+                    MessageBox.Show("TableA 與 TableB 同步匯入成功！");
+                }
+                catch
+                {
+                    trans.Rollback();
+                    throw;
+                }
+            }
+        }
+        LoadAllData(); // 重新整理畫面
+    }
+    catch (Exception ex) { MessageBox.Show("匯入失敗: " + ex.Message); }
+}
+
