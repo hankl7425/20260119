@@ -1,0 +1,204 @@
+using System;
+using System.Data;
+using System.Data.SqlClient;
+using System.Drawing;
+using System.Windows.Forms;
+
+namespace SyncApp
+{
+    public partial class Form1 : Form
+    {
+        // =========================================================
+        // 請將此處替換為您真實的 SQL Server 連線字串
+        // =========================================================
+        private readonly string connStrA = @"Server=伺服器IP或名稱;Database=DatabaseA;User Id=帳號;Password=密碼;";
+        private readonly string connStrB = @"Server=伺服器IP或名稱;Database=DatabaseB;User Id=帳號;Password=密碼;";
+
+        // UI 控制項宣告
+        private DataGridView dgvA_TableA;
+        private DataGridView dgvB_TableA;
+        private DataGridView dgvB_TableB;
+        private Button btnImport;
+        private Button btnDelete;
+
+        public Form1()
+        {
+            InitializeUI();
+            LoadAllData();
+        }
+
+        /// <summary>
+        /// 動態建立畫面 UI (左側三個表格，右側兩個按鈕)
+        /// </summary>
+        private void InitializeUI()
+        {
+            this.Text = "資料庫資料匯入工具";
+            this.Size = new Size(1000, 700);
+            this.StartPosition = FormStartPosition.CenterScreen;
+
+            // 右側按鈕區塊
+            Panel panelButtons = new Panel();
+            panelButtons.Dock = DockStyle.Right;
+            panelButtons.Width = 150;
+            panelButtons.Padding = new Padding(10);
+
+            btnImport = new Button();
+            btnImport.Text = "匯入";
+            btnImport.Size = new Size(130, 45);
+            btnImport.Location = new Point(10, 20);
+            btnImport.BackColor = Color.LightGreen;
+            btnImport.Click += BtnImport_Click;
+
+            btnDelete = new Button();
+            btnDelete.Text = "刪除匯入";
+            btnDelete.Size = new Size(130, 45);
+            btnDelete.Location = new Point(10, 80);
+            btnDelete.BackColor = Color.LightCoral;
+            btnDelete.Click += BtnDelete_Click;
+
+            panelButtons.Controls.Add(btnImport);
+            panelButtons.Controls.Add(btnDelete);
+
+            // 左側表格區塊 (從上到下分成三等份)
+            TableLayoutPanel panelGrids = new TableLayoutPanel();
+            panelGrids.Dock = DockStyle.Fill;
+            panelGrids.ColumnCount = 1;
+            panelGrids.RowCount = 3;
+            panelGrids.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33f));
+            panelGrids.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33f));
+            panelGrids.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33f));
+
+            // 將 DataGridView 包裝在 GroupBox 中以標示名稱
+            panelGrids.Controls.Add(CreateGridWithGroup("最上方：資料庫 A - TableA", out dgvA_TableA), 0, 0);
+            panelGrids.Controls.Add(CreateGridWithGroup("中間：資料庫 B - TableA", out dgvB_TableA), 0, 1);
+            panelGrids.Controls.Add(CreateGridWithGroup("最下方：資料庫 B - TableB (暫不更動)", out dgvB_TableB), 0, 2);
+
+            this.Controls.Add(panelGrids);
+            this.Controls.Add(panelButtons);
+        }
+
+        private GroupBox CreateGridWithGroup(string title, out DataGridView dgv)
+        {
+            GroupBox gb = new GroupBox() { Text = title, Dock = DockStyle.Fill, Padding = new Padding(5) };
+            dgv = new DataGridView() 
+            { 
+                Dock = DockStyle.Fill, 
+                AllowUserToAddRows = false, 
+                ReadOnly = true,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                BackgroundColor = Color.White
+            };
+            gb.Controls.Add(dgv);
+            return gb;
+        }
+
+        /// <summary>
+        /// 載入三個表格的資料
+        /// </summary>
+        private void LoadAllData()
+        {
+            dgvA_TableA.DataSource = GetDataTable(connStrA, "SELECT * FROM TableA");
+            dgvB_TableA.DataSource = GetDataTable(connStrB, "SELECT * FROM TableA");
+            dgvB_TableB.DataSource = GetDataTable(connStrB, "SELECT * FROM TableB");
+        }
+
+        /// <summary>
+        /// 共用的撈取資料方法 (動態適應任何欄位)
+        /// </summary>
+        private DataTable GetDataTable(string connectionString, string query)
+        {
+            DataTable dt = new DataTable();
+            try
+            {
+                using (SqlConnection conn = new SqlConnection(connectionString))
+                {
+                    using (SqlDataAdapter da = new SqlDataAdapter(query, conn))
+                    {
+                        da.Fill(dt);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"資料載入失敗 ({query}):\n{ex.Message}", "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            return dt;
+        }
+
+        /// <summary>
+        /// 匯入按鈕事件 (A.TableA -> B.TableA)
+        /// </summary>
+        private void BtnImport_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                // 1. 先將 A 資料庫的 TableA 抓到記憶體中
+                DataTable dtA = GetDataTable(connStrA, "SELECT * FROM TableA");
+
+                if (dtA.Rows.Count == 0)
+                {
+                    MessageBox.Show("資料庫 A 的 TableA 沒有資料可供匯入。");
+                    return;
+                }
+
+                // 2. 使用 SqlBulkCopy 大批次寫入資料庫 B 的 TableA
+                using (SqlConnection connB = new SqlConnection(connStrB))
+                {
+                    connB.Open();
+                    // KeepIdentity 保留原本的自動遞增 ID (如果有的話)
+                    using (SqlBulkCopy bulkCopy = new SqlBulkCopy(connB, SqlBulkCopyOptions.KeepIdentity, null))
+                    {
+                        bulkCopy.DestinationTableName = "TableA";
+                        // 直接寫入 DataTable
+                        bulkCopy.WriteToServer(dtA);
+                    }
+                }
+
+                MessageBox.Show("資料匯入成功！", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                
+                // 3. 重新載入中間的表單 (DB_B 的 TableA)
+                dgvB_TableA.DataSource = GetDataTable(connStrB, "SELECT * FROM TableA");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"匯入失敗:\n{ex.Message}", "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// 刪除匯入按鈕事件 (清空 B.TableA)
+        /// </summary>
+        private void BtnDelete_Click(object sender, EventArgs e)
+        {
+            DialogResult result = MessageBox.Show("確定要清空『資料庫 B』的 TableA 嗎？\n此動作無法復原！", "確認刪除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            
+            if (result == DialogResult.Yes)
+            {
+                try
+                {
+                    using (SqlConnection connB = new SqlConnection(connStrB))
+                    {
+                        // 使用 DELETE FROM 會比較安全（若有 Foreign Key）。若要重置自動遞增值可改用 "TRUNCATE TABLE TableA"
+                        string query = "DELETE FROM TableA"; 
+                        
+                        using (SqlCommand cmd = new SqlCommand(query, connB))
+                        {
+                            connB.Open();
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
+
+                    MessageBox.Show("資料已清空！", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    
+                    // 重新載入中間的表單 (DB_B 的 TableA)
+                    dgvB_TableA.DataSource = GetDataTable(connStrB, "SELECT * FROM TableA");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"刪除失敗:\n{ex.Message}", "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+    }
+}
+
