@@ -1,0 +1,50 @@
+/// <summary>
+/// 匯入按鈕事件 (A.TableA -> B.TableA)
+/// </summary>
+private void BtnImport_Click(object sender, EventArgs e)
+{
+    try
+    {
+        // 1. 先將 A 資料庫的 TableA 抓到記憶體中
+        DataTable dtA = GetDataTable(connStrA, "SELECT * FROM TableA");
+
+        if (dtA.Rows.Count == 0)
+        {
+            MessageBox.Show("資料庫 A 的 TableA 沒有資料可供匯入。");
+            return;
+        }
+
+        // 2. 使用 SqlBulkCopy 大批次寫入資料庫 B 的 TableA
+        using (SqlConnection connB = new SqlConnection(connStrB))
+        {
+            connB.Open();
+            using (SqlBulkCopy bulkCopy = new SqlBulkCopy(connB, SqlBulkCopyOptions.KeepIdentity, null))
+            {
+                bulkCopy.DestinationTableName = "TableA";
+
+                // ==========================================
+                // 【關鍵修改】：動態依照「欄位名稱」建立對應關係
+                // ==========================================
+                // 這樣設定後，程式只會把 dtA 裡有的欄位寫入資料庫 B 同名的欄位。
+                // 資料庫 B 中多出來的後面欄位，SqlBulkCopy 會直接忽略，SQL Server 會自動填入 NULL 或預設值。
+                foreach (DataColumn col in dtA.Columns)
+                {
+                    bulkCopy.ColumnMappings.Add(col.ColumnName, col.ColumnName);
+                }
+
+                // 寫入資料
+                bulkCopy.WriteToServer(dtA);
+            }
+        }
+
+        MessageBox.Show("資料匯入成功！後面未對應的欄位已自動留空。", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        
+        // 3. 重新載入中間的表單 (DB_B 的 TableA)
+        dgvB_TableA.DataSource = GetDataTable(connStrB, "SELECT * FROM TableA");
+    }
+    catch (Exception ex)
+    {
+        MessageBox.Show($"匯入失敗:\n{ex.Message}", "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error);
+    }
+}
+
