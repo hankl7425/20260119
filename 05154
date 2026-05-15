@@ -1,0 +1,51 @@
+private void BtnDelete_Click(object sender, EventArgs e)
+{
+    if (MessageBox.Show("確定要刪除所有匯入的資料嗎？", "確認", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+
+    try
+    {
+        string tableAName = "tMainReport";
+        string tableBName = "TableB";
+        string pkName = "ID";
+
+        using (SqlConnection connB = new SqlConnection(connStrB))
+        {
+            connB.Open();
+            using (SqlTransaction trans = connB.BeginTransaction())
+            {
+                try
+                {
+                    // 1. 刪除 TableB：必須透過 JOIN TableA 來過濾 DataSource = 2
+                    string sqlDelB = $@"
+                        DELETE B 
+                        FROM {tableBName} AS B
+                        INNER JOIN {tableAName} AS A ON B.{pkName} = A.{pkName}
+                        WHERE A.DataSource = 2";
+                    
+                    using (SqlCommand cmdB = new SqlCommand(sqlDelB, connB, trans))
+                    {
+                        cmdB.ExecuteNonQuery();
+                    }
+
+                    // 2. 刪除 TableA
+                    string sqlDelA = $"DELETE FROM {tableAName} WHERE DataSource = 2";
+                    using (SqlCommand cmdA = new SqlCommand(sqlDelA, connB, trans))
+                    {
+                        cmdA.ExecuteNonQuery();
+                    }
+
+                    trans.Commit();
+                    MessageBox.Show("匯入資料已從 TableA 與 TableB 清除！");
+                }
+                catch
+                {
+                    trans.Rollback();
+                    throw;
+                }
+            }
+        }
+        LoadAllData();
+    }
+    catch (Exception ex) { MessageBox.Show("刪除失敗: " + ex.Message); }
+}
+
