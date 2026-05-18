@@ -1,0 +1,59 @@
+using System;
+using System.Data;
+// 如果是較新的 .NET Core / .NET 5+ 專案，建議使用 Microsoft.Data.SqlClient
+using Microsoft.Data.SqlClient; 
+
+public class SequenceGenerator
+{
+    // 替換成你實際的資料庫連線字串
+    private readonly string _connectionString = "Server=你的伺服器;Database=你的資料庫;User Id=你的帳號;Password=你的密碼;TrustServerCertificate=True;";
+
+    public int GetNextMaxSeqE(string rptType, string year, string yearMark, string stockAttrib)
+    {
+        int nextSeq = 0;
+
+        using (SqlConnection conn = new SqlConnection(_connectionString))
+        {
+            using (SqlCommand cmd = new SqlCommand("dbo.usp_GetNextMaxSeqE", conn))
+            {
+                // 指定這是一個 Stored Procedure
+                cmd.CommandType = CommandType.StoredProcedure;
+
+                // 1. 設定四個 Input 參數 (對應 CHAR 型別與長度)
+                cmd.Parameters.Add("@rpt_type", SqlDbType.Char, 1).Value = rptType;
+                cmd.Parameters.Add("@Year", SqlDbType.Char, 3).Value = year;
+                cmd.Parameters.Add("@Year_mark", SqlDbType.Char, 1).Value = yearMark;
+                cmd.Parameters.Add("@Stock_attrib", SqlDbType.Char, 1).Value = stockAttrib;
+
+                // 2. 設定 Output 參數
+                SqlParameter outParam = new SqlParameter("@OutMaxseq", SqlDbType.Int)
+                {
+                    Direction = ParameterDirection.Output // 標註為輸出參數
+                };
+                cmd.Parameters.Add(outParam);
+
+                try
+                {
+                    // 開啟連線並執行
+                    conn.Open();
+                    cmd.ExecuteNonQuery(); // 因為我們不需要回傳資料表，只需執行並拿回 OUTPUT 變數
+
+                    // 3. 取得 Output 參數的回傳值
+                    if (outParam.Value != DBNull.Value)
+                    {
+                        nextSeq = Convert.ToInt32(outParam.Value);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // 這裡可以換成你專案使用的 Log 紀錄方式
+                    Console.WriteLine($"發生錯誤: {ex.Message}");
+                    throw; 
+                }
+            }
+        }
+
+        return nextSeq;
+    }
+}
+
