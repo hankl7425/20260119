@@ -1,0 +1,139 @@
+private void BtnImport_Click(object sender, EventArgs e)
+{
+    try
+    {
+        // 定義資料表名稱
+        string tableAName = "tMainReport"; 
+        string tableBName = "TableB";      
+        string tableCName = "TableC";      // 請替換為您 TableC 的真實名稱
+        
+        // 5 個複合主鍵
+        string[] pkColumns = { "year", "year_mark", "ban", "rpt_type", "amend_cnt" };
+
+        // 1. 一次性撈取資料庫 A 的 TableA 與 TableC 到記憶體中（避免在迴圈中重複查詢資料庫，提升效能）
+        DataTable dtA = GetDataTable(connStrA, "SELECT * FROM " + tableAName);
+        DataTable dtC_Source = GetDataTable(connStrA, "SELECT * FROM " + tableCName);
+
+        if (dtA.Rows.Count == 0)
+        {
+            MessageBox.Show("資料庫 A 的 " + tableAName + " 沒有資料可供匯入。");
+            return;
+        }
+
+        // 2. 取得目的資料庫 B 的空表結構，用來動態比對欄位
+        DataTable dtA_SchemaB = GetDataTable(connStrB, "SELECT TOP 0 * FROM " + tableAName);
+        DataTable dtC_SchemaB = GetDataTable(connStrB, "SELECT TOP 0 * FROM " + tableCName);
+
+        // 3. 找出 TableA 兩邊都有的共同欄位
+        var commonColsA = new System.Collections.Generic.List<string>();
+        foreach (DataColumn col in dtA.Columns)
+        {
+            if (dtA_SchemaB.Columns.Contains(col.ColumnName)) commonColsA.Add(col.ColumnName);
+        }
+
+        // 4. 找出 TableC 兩邊都有的共同欄位
+        var commonColsC = new System.Collections.Generic.List<string>();
+        foreach (DataColumn col in dtC_Source.Columns)
+        {
+            if (dtC_SchemaB.Columns.Contains(col.ColumnName)) commonColsC.Add(col.ColumnName);
+        }
+
+        // 5. 動態組裝各資料表的 SQL 語法
+        // TableA (含所有共通欄位 + DataSource=2)
+        string colsA = string.Join(", ", commonColsA.ConvertAll(c => "[" + c + "]").ToArray()) + ", [DataSource]";
+        string paramsA = string.Join(", ", commonColsA.ConvertAll(c => "@" + c).ToArray()) + ", 2";
+        string sqlInsertA = "INSERT INTO " + tableAName + " (" + colsA + ") VALUES (" + paramsA + ")";
+
+        // TableB (僅寫入五個主鍵欄位)
+        string colsB = string.Join(", ", System.Array.ConvertAll(pkColumns, c => "[" + c + "]"));
+        string paramsB = string.Join(", ", System.Array.ConvertAll(pkColumns, c => "@" + c));
+        string sqlInsertB = "INSERT INTO " + tableBName + " (" + colsB + ") VALUES (" + paramsB + ")";
+
+        // TableC (動態對應 TableC 的共通欄位)
+        string colsC = string.Join(", ", commonColsC.ConvertAll(c => "[" + c + "]").ToArray());
+        string paramsC = string.Join(", ", commonColsC.ConvertAll(c => "@" + c).ToArray());
+        string sqlInsertC = "INSERT INTO " + tableCName + " (" + colsC + ") VALUES (" + paramsC + ")";
+
+        // 6. 開始執行資料庫 B 的交易寫入
+        using (SqlConnection connB = new SqlConnection(connStrB))
+        {
+            connB.Open();
+            using (SqlTransaction trans = connB.BeginTransaction())
+            {
+                try
+                {
+                    using (SqlCommand cmdA = new SqlCommand(sqlInsertA, connB, trans))
+                    using (SqlCommand cmdB = new SqlCommand(sqlInsertB, connB, trans))
+                    using (SqlCommand cmdC = new SqlCommand(sqlInsertC, connB, trans))
+                    {
+                        foreach (DataRow rowA in dtA.Rows)
+                        {
+                            // --- (A) 寫入 TableA ---
+                            cmdA.Parameters.Clear();
+                            foreach (string colName in commonColsA)
+                            {
+                                cmdA.Parameters.AddWithValue("@" + colName, rowA[colName] ?? DBNull.Value);
+                            }
+                            cmdA.ExecuteNonQuery();
+
+                            // --- (B) 寫入 TableB ---
+                            cmdB.Parameters.Clear();
+                            foreach (string pk in pkColumns)
+                            {
+                                cmdB.Parameters.AddWithValue("@" + pk, rowA[pk] ?? DBNull.Value);
+                            }
+                            cmdB.ExecuteNonQuery();
+
+                            // --- (C) 篩選並寫入 TableC ---
+                            // 動態根據這筆 rowA 的 5 個主鍵值，組裝 C# DataTable 的篩選字串
+                            System.Collections.Generic.List<string> filterParts = new System.Collections.Generic.List<string>();
+                            foreach (string pk in pkColumns)
+                            {
+                                object pkVal = rowA[pk];
+                                if (pkVal is string)
+                                {
+                                    filterParts.Add(pk + " = '" + pkVal.ToString().Replace("'", "''") + "'");
+                                }
+                                else if (pkVal is DateTime)
+                                {
+                                    filterParts.Add(pk + " = '" + ((DateTime)pkVal).ToString("yyyy-MM-dd HH:mm:ss") + "'");
+                                }
+                                else
+                                {
+                                    filterParts.Add(pk + " = " + pkVal.ToString());
+                                }
+                            }
+                            string filterExp = string.Join(" AND ", filterParts.ToArray());
+                            
+                            // 從記憶體中抓出這筆 TableA 對應在 TableC 的所有附屬資料 (可能 0 到多筆)
+                            DataRow[] rowsC = dtC_Source.Select(filterExp);
+
+                            foreach (DataRow rowC in rowsC)
+                            {
+                                cmdC.Parameters.Clear();
+                                foreach (string colName in commonColsC)
+                                {
+                                    cmdC.Parameters.AddWithValue("@" + colName, rowC[colName] ?? DBNull.Value);
+                                }
+                                cmdC.ExecuteNonQuery();
+                            }
+                        }
+                    }
+                    trans.Commit(); // 成功則提交
+                    MessageBox.Show("TableA、TableB、TableC 資料已同步匯入成功！", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    trans.Rollback(); // 失敗則全數回滾
+                    throw ex;
+                }
+            }
+        }
+        LoadAllData(); // 重新整理 UI 畫面
+    }
+    catch (Exception ex) 
+    { 
+        MessageBox.Show("匯入失敗:\n" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error); 
+    }
+}
+
