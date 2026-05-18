@@ -1,0 +1,53 @@
+CREATE PROCEDURE dbo.usp_GetNextMaxSeqE
+    @rpt_type CHAR(1),
+    @Year CHAR(3),
+    @Year_mark CHAR(1),
+    @Stock_attrib CHAR(1),
+    @OutMaxseq INT OUTPUT -- 使用 OUTPUT 參數將取到的號碼回傳
+AS
+BEGIN
+    -- 關閉影響行數的訊息回傳，可提升些微效能
+    SET NOCOUNT ON; 
+
+    -- 開啟交易，確保取號過程的資料一致性
+    BEGIN TRANSACTION;
+
+    BEGIN TRY
+        -- 【核心邏輯】利用單一 UPDATE 語句同時達成：
+        -- 1. 將目前的 Maxseq 賦值給輸出變數 @OutMaxseq (取號)
+        -- 2. 將資料表內的 Maxseq 往上加 1
+        -- 加上 WITH (UPDLOCK) 提示，防止並行執行時產生死結 (Deadlock)
+        UPDATE tMaxSeqE WITH (UPDLOCK)
+        SET 
+            @OutMaxseq = Maxseq,       -- 先將當前號碼存入變數回傳
+            Maxseq = Maxseq + 1        -- 然後將欄位值加 1 並更新
+        WHERE 
+            rpt_type = @rpt_type
+            AND [Year] = @Year
+            AND Year_mark = @Year_mark
+            AND Stock_attrib = @Stock_attrib;
+
+        -- 如果 @@ROWCOUNT = 0，代表這個條件組合是第一次來取號（資料表中尚無紀錄）
+        IF @@ROWCOUNT = 0
+        BEGIN
+            -- 假設第一號為 1，因此回傳 1
+            SET @OutMaxseq = 1;
+
+            -- 寫入新紀錄，因為 1 已經被取走，所以存入表中的下次號碼為 2
+            INSERT INTO tMaxSeqE (rpt_type, [Year], Year_mark, Stock_attrib, Maxseq)
+            VALUES (@rpt_type, @Year, @Year_mark, @Stock_attrib, 2);
+        END
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        -- 發生錯誤時還原交易
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+        
+        -- 拋出錯誤訊息給呼叫端
+        THROW;
+    END CATCH
+END;
+GO
+
