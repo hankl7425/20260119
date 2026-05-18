@@ -1,0 +1,78 @@
+private void BtnDelete_Click(object sender, EventArgs e)
+{
+    if (MessageBox.Show("確定要刪除所有匯入的資料嗎？\n將連同 TableA、TableB、TableC 一併清除！", "確認刪除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+
+    try
+    {
+        string tableAName = "tMainReport";
+        string tableBName = "TableB";
+        string tableCName = "TableC"; // 請替換為您 TableC 的真實名稱
+        
+        // 組裝五個主鍵的 JOIN 條件範本
+        string[] joinConditions = {
+            "X.year = A.year",
+            "X.year_mark = A.year_mark",
+            "X.ban = A.ban",
+            "X.rpt_type = A.rpt_type",
+            "X.amend_cnt = A.amend_cnt"
+        };
+        string joinBaseStr = string.Join(" AND ", joinConditions);
+
+        using (SqlConnection connB = new SqlConnection(connStrB))
+        {
+            connB.Open();
+            using (SqlTransaction trans = connB.BeginTransaction())
+            {
+                try
+                {
+                    // 【注意】：刪除順序必須由下而上（子資料表先刪，最後刪主資料表 TableA），避免違反資料庫外鍵條件。
+
+                    // 1. 刪除 TableC
+                    string sqlDelC = string.Format(@"
+                        DELETE C 
+                        FROM {0} AS C
+                        INNER JOIN {1} AS A ON {2}
+                        WHERE A.DataSource = 2", tableCName, tableAName, joinBaseStr.Replace("X.", "C."));
+                    
+                    using (SqlCommand cmdC = new SqlCommand(sqlDelC, connB, trans))
+                    {
+                        cmdC.ExecuteNonQuery();
+                    }
+
+                    // 2. 刪除 TableB
+                    string sqlDelB = string.Format(@"
+                        DELETE B 
+                        FROM {0} AS B
+                        INNER JOIN {1} AS A ON {2}
+                        WHERE A.DataSource = 2", tableBName, tableAName, joinBaseStr.Replace("X.", "B."));
+                    
+                    using (SqlCommand cmdB = new SqlCommand(sqlDelB, connB, trans))
+                    {
+                        cmdB.ExecuteNonQuery();
+                    }
+
+                    // 3. 最後刪除 TableA
+                    string sqlDelA = "DELETE FROM " + tableAName + " WHERE DataSource = 2";
+                    using (SqlCommand cmdA = new SqlCommand(sqlDelA, connB, trans))
+                    {
+                        cmdA.ExecuteNonQuery();
+                    }
+
+                    trans.Commit();
+                    MessageBox.Show("所有匯入資料（含 TableC 關連資料）已成功清除！", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    trans.Rollback();
+                    throw ex;
+                }
+            }
+        }
+        LoadAllData(); // 重新整理 UI 畫面
+    }
+    catch (Exception ex) 
+    { 
+        MessageBox.Show("刪除失敗:\n" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error); 
+    }
+}
+
