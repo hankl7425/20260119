@@ -1,0 +1,174 @@
+/// <summary>
+/// 載入三個表格的資料，並在 TableA 加入 Checkbox 欄位
+/// </summary>
+private void LoadAllData()
+{
+    // 請將這裡的 tMainReport 換成您真實的 TableA 名稱
+    string tableAName = "tMainReport"; 
+    
+    // 1. 載入資料庫 A 的 TableA
+    DataTable dtA = GetDataTable(connStrA, "SELECT * FROM " + tableAName);
+    
+    // 動態新增一個布林值欄位，當作 Checkbox
+    DataColumn chkCol = new DataColumn("選取", typeof(bool));
+    chkCol.DefaultValue = false; // 預設不勾選
+    dtA.Columns.Add(chkCol);
+    chkCol.SetOrdinal(0); // 把 Checkbox 移到最左邊第 0 欄
+
+    dgvA_TableA.DataSource = dtA;
+
+    // 開放這個 Grid 可以編輯 (因為要讓使用者打勾)
+    dgvA_TableA.ReadOnly = false;
+    
+    // 但除了「選取」欄位外，其他原本資料庫的欄位全部鎖定唯讀
+    foreach (DataGridViewColumn col in dgvA_TableA.Columns)
+    {
+        if (col.Name != "選取")
+        {
+            col.ReadOnly = true;
+        }
+    }
+
+    // 2. 載入資料庫 B 的資料 (維持原本唯讀狀態)
+    dgvB_TableA.DataSource = GetDataTable(connStrB, "SELECT * FROM " + tableAName);
+    
+    // 如果您有顯示 TableB，也一併載入
+    // dgvB_TableB.DataSource = GetDataTable(connStrB, "SELECT * FROM TableB");
+}
+
+private void BtnImport_Click(object sender, EventArgs e)
+{
+    try
+    {
+        string tableAName = "tMainReport"; 
+        string tableBName = "TableB";      
+        string tableCName = "TableC";      
+        string[] pkColumns = { "year", "year_mark", "ban", "rpt_type", "amend_cnt" };
+
+        // ==========================================
+        // 【關鍵改變 1】：強制結束編輯狀態
+        // 避免使用者剛打勾，還沒點其他地方就按匯入，導致勾選狀態沒寫入 DataTable
+        // ==========================================
+        dgvA_TableA.EndEdit();
+
+        // ==========================================
+        // 【關鍵改變 2】：直接從畫面抓資料，並篩選有勾選的
+        // ==========================================
+        DataTable dtA_Full = (DataTable)dgvA_TableA.DataSource;
+        DataRow[] checkedRows = dtA_Full.Select("[選取] = True");
+
+        if (checkedRows.Length == 0)
+        {
+            MessageBox.Show("請至少勾選一筆要匯入的資料！", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // TableC 的來源資料一樣先全部撈到記憶體備用
+        DataTable dtC_Source = GetDataTable(connStrA, "SELECT * FROM " + tableCName);
+
+        DataTable dtA_SchemaB = GetDataTable(connStrB, "SELECT TOP 0 * FROM " + tableAName);
+        DataTable dtC_SchemaB = GetDataTable(connStrB, "SELECT TOP 0 * FROM " + tableCName);
+
+        // ==========================================
+        // 【關鍵改變 3】：比對共同欄位時，必須略過「選取」欄位
+        // ==========================================
+        var commonColsA = new System.Collections.Generic.List<string>();
+        foreach (DataColumn col in dtA_Full.Columns)
+        {
+            if (col.ColumnName == "選取") continue; // 跳過自建的 Checkbox 欄位
+            if (dtA_SchemaB.Columns.Contains(col.ColumnName)) commonColsA.Add(col.ColumnName);
+        }
+
+        var commonColsC = new System.Collections.Generic.List<string>();
+        foreach (DataColumn col in dtC_Source.Columns)
+        {
+            if (dtC_SchemaB.Columns.Contains(col.ColumnName)) commonColsC.Add(col.ColumnName);
+        }
+
+        string colsA = string.Join(", ", commonColsA.ConvertAll(c => "[" + c + "]").ToArray()) + ", [DataSource]";
+        string paramsA = string.Join(", ", commonColsA.ConvertAll(c => "@" + c).ToArray()) + ", 2";
+        string sqlInsertA = "INSERT INTO " + tableAName + " (" + colsA + ") VALUES (" + paramsA + ")";
+
+        string colsB = string.Join(", ", System.Array.ConvertAll(pkColumns, c => "[" + c + "]"));
+        string paramsB = string.Join(", ", System.Array.ConvertAll(pkColumns, c => "@" + c));
+        string sqlInsertB = "INSERT INTO " + tableBName + " (" + colsB + ") VALUES (" + paramsB + ")";
+
+        string colsC = string.Join(", ", commonColsC.ConvertAll(c => "[" + c + "]").ToArray());
+        string paramsC = string.Join(", ", commonColsC.ConvertAll(c => "@" + c).ToArray());
+        string sqlInsertC = "INSERT INTO " + tableCName + " (" + colsC + ") VALUES (" + paramsC + ")";
+
+        using (SqlConnection connB = new SqlConnection(connStrB))
+        {
+            connB.Open();
+            using (SqlTransaction trans = connB.BeginTransaction())
+            {
+                try
+                {
+                    using (SqlCommand cmdA = new SqlCommand(sqlInsertA, connB, trans))
+                    using (SqlCommand cmdB = new SqlCommand(sqlInsertB, connB, trans))
+                    using (SqlCommand cmdC = new SqlCommand(sqlInsertC, connB, trans))
+                    {
+                        // ==========================================
+                        // 【關鍵改變 4】：只針對勾選的 checkedRows 跑迴圈
+                        // ==========================================
+                        foreach (DataRow rowA in checkedRows)
+                        {
+                            // --- (A) 寫入 TableA ---
+                            cmdA.Parameters.Clear();
+                            foreach (string colName in commonColsA)
+                            {
+                                cmdA.Parameters.AddWithValue("@" + colName, rowA[colName] ?? DBNull.Value);
+                            }
+                            cmdA.ExecuteNonQuery();
+
+                            // --- (B) 寫入 TableB ---
+                            cmdB.Parameters.Clear();
+                            foreach (string pk in pkColumns)
+                            {
+                                cmdB.Parameters.AddWithValue("@" + pk, rowA[pk] ?? DBNull.Value);
+                            }
+                            cmdB.ExecuteNonQuery();
+
+                            // --- (C) 篩選並寫入 TableC ---
+                            System.Collections.Generic.List<string> filterParts = new System.Collections.Generic.List<string>();
+                            foreach (string pk in pkColumns)
+                            {
+                                object pkVal = rowA[pk];
+                                if (pkVal is string)
+                                    filterParts.Add(pk + " = '" + pkVal.ToString().Replace("'", "''") + "'");
+                                else if (pkVal is DateTime)
+                                    filterParts.Add(pk + " = '" + ((DateTime)pkVal).ToString("yyyy-MM-dd HH:mm:ss") + "'");
+                                else
+                                    filterParts.Add(pk + " = " + pkVal.ToString());
+                            }
+                            string filterExp = string.Join(" AND ", filterParts.ToArray());
+                            
+                            DataRow[] rowsC = dtC_Source.Select(filterExp);
+                            foreach (DataRow rowC in rowsC)
+                            {
+                                cmdC.Parameters.Clear();
+                                foreach (string colName in commonColsC)
+                                {
+                                    cmdC.Parameters.AddWithValue("@" + colName, rowC[colName] ?? DBNull.Value);
+                                }
+                                cmdC.ExecuteNonQuery();
+                            }
+                        }
+                    }
+                    trans.Commit();
+                    MessageBox.Show($"已成功匯入 {checkedRows.Length} 筆資料！", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    trans.Rollback();
+                    throw ex;
+                }
+            }
+        }
+        LoadAllData(); 
+    }
+    catch (Exception ex) 
+    { 
+        MessageBox.Show("匯入失敗:\n" + ex.Message, "錯誤", MessageBoxButtons.OK, MessageBoxIcon.Error); 
+    }
+}
